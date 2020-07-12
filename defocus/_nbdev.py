@@ -2,14 +2,26 @@
 
 __all__ = ["index", "modules", "custom_doc_links", "git_url"]
 
-index = {"initialize_weights": "00_models.ipynb",
-         "ResidualDenseBlock_5C": "00_models.ipynb",
-         "RRDB": "00_models.ipynb",
-         "RRDBNet": "00_models.ipynb",
-         "Discriminator_VGG_128": "00_models.ipynb",
-         "VGGFeatureExtractor": "00_models.ipynb"}
+index = {"Model": "01_model.ipynb",
+         "ResBlock": "02_generators.ipynb",
+         "ResNet": "02_generators.ipynb",
+         "UpConv2D": "02_generators.ipynb",
+         "MSResNetGenerator": "02_generators.ipynb",
+         "MSResNetDiscriminator": "03_discriminators.ipynb",
+         "Dataset": "04_dataset.ipynb",
+         "DiffAugment": "99_diffaugment.ipynb",
+         "rand_brightness": "99_diffaugment.ipynb",
+         "rand_saturation": "99_diffaugment.ipynb",
+         "rand_contrast": "99_diffaugment.ipynb",
+         "rand_translation": "99_diffaugment.ipynb",
+         "rand_cutout": "99_diffaugment.ipynb",
+         "AUGMENT_FNS": "99_diffaugment.ipynb"}
 
-modules = ["models.py"]
+modules = ["model.py",
+           "networks/generators.py",
+           "networks/discriminators.py",
+           "dataset.py",
+           "diffaugment.py"]
 
 doc_url = "https://emirkonuk.github.io/defocus/"
 

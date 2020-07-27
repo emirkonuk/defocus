@@ -73,11 +73,14 @@ class GAN(pl.LightningModule):
         else:
             opt_g = torch.optim.Adam(self.G.parameters(), lr=lr, betas=betas, weight_decay=0)
             opt_d = torch.optim.Adam(self.D.parameters(), lr=lr, betas=betas, weight_decay=0)
-        return [opt_d, opt_g], []
+
+        scheduler_d = torch.optim.lr_scheduler.MultiStepLR(opt_d, milestones=[500,750,900], gamma=0.5)
+        scheduler_g = torch.optim.lr_scheduler.MultiStepLR(opt_g, milestones=[500,750,900], gamma=0.5)
+        return [opt_d, opt_g], [scheduler_d, scheduler_g]
 
     def train_dataloader(self):
-        train_dataset = self.Dataset(root_folder='/storage/projects/all_datasets/GOPRO/train/',
-                                     image_pair_list='/storage/projects/all_datasets/GOPRO/train/train_image_pair_list.txt',
+        train_dataset = self.Dataset(root_folder=self.hparams.root_folder,
+                                     image_pair_list=self.hparams.image_pair_list,
                                     )
         return DataLoader(train_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers)
 

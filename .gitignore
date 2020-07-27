@@ -1,4 +1,6 @@
 third_party_repositories/
+nbs/lightning_logs/
+experiments/
 *.bak
 .gitattributes
 .last_checked

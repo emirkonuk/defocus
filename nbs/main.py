@@ -145,5 +145,7 @@ if __name__ == "__main__":
                         help='Mixed precision')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer to use. currently Adam or AdamP')
     parser.add_argument('--milestones', type=int, nargs='+', default=[500, 750, 900], help='learning rate decay per N epochs')
+    parser.add_argument('--root_folder', type=str, default='/storage/projects/all_datasets/GOPRO/train/', help='root folder')
+    parser.add_argument('--image_pair_list', type=str, default='/storage/projects/all_datasets/GOPRO/train/train_image_pair_list.txt', help='image list')
     args = parser.parse_args()
     main(args)

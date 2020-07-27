@@ -3,25 +3,37 @@
 __all__ = ["index", "modules", "custom_doc_links", "git_url"]
 
 index = {"Model": "01_model.ipynb",
-         "ResBlock": "02_generators.ipynb",
-         "ResNet": "02_generators.ipynb",
-         "UpConv2D": "02_generators.ipynb",
-         "MSResNetGenerator": "02_generators.ipynb",
-         "MSResNetDiscriminator": "03_discriminators.ipynb",
-         "Dataset": "04_dataset.ipynb",
+         "ResBlock": "02_architecture_common.ipynb",
+         "ResNet": "02_architecture_common.ipynb",
+         "UpConv2D": "02_architecture_common.ipynb",
+         "Generator": "03_architecture_MSResNet.ipynb",
+         "Discriminator": "03_architecture_MSResNet.ipynb",
+         "add_gaussian_noise": "04_dataset_common.ipynb",
+         "crop": "04_dataset_common.ipynb",
+         "hflip": "04_dataset_common.ipynb",
+         "vflip": "04_dataset_common.ipynb",
+         "rot90": "04_dataset_common.ipynb",
+         "channel_shuffle": "04_dataset_common.ipynb",
+         "saturation": "04_dataset_common.ipynb",
+         "Dataset": "05_dataset_MSResNet.ipynb",
+         "Trainer": "06_trainer_MSResNet.ipynb",
          "DiffAugment": "99_diffaugment.ipynb",
          "rand_brightness": "99_diffaugment.ipynb",
          "rand_saturation": "99_diffaugment.ipynb",
          "rand_contrast": "99_diffaugment.ipynb",
          "rand_translation": "99_diffaugment.ipynb",
          "rand_cutout": "99_diffaugment.ipynb",
-         "AUGMENT_FNS": "99_diffaugment.ipynb"}
+         "AUGMENT_FNS": "99_diffaugment.ipynb",
+         "GAN": "lightning_trial.ipynb"}
 
 modules = ["model.py",
-           "networks/generators.py",
-           "networks/discriminators.py",
-           "dataset.py",
-           "diffaugment.py"]
+           "architecture/common.py",
+           "architecture/MSResNet.py",
+           "data/common.py",
+           "data/MSResNet.py",
+           "trainers/MSResNet.py",
+           "data/diffaugment.py",
+           "lightning/MSResNet.py"]
 
 doc_url = "https://emirkonuk.github.io/defocus/"
 

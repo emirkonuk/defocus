@@ -6,10 +6,9 @@ __all__ = ['Model']
 import torch
 import torch.nn as nn
 import torchvision
-import defocus.networks.generators as generators
-import defocus.networks.discriminators as discriminators
 from torch.optim import Adam
 from adamp import AdamP
+from torch.nn.parallel import DistributedDataParallel, DataParallel
 
 # Cell
 class Model(nn.Module):
@@ -18,26 +17,13 @@ class Model(nn.Module):
         self.G = None
         self.D = None
         self.P = None
-        self.G_opt = None
-        self.D_opt = None
+        self.G_optimizer = None
+        self.D_optimizer = None
+        self.reconstruction_loss = None
+        self.adversarial_loss = None
+        self.perceptual_loss = None
 
-    def set_generator(self, G):
-        # if G is a string, find that model in the generators.py and create it
-        if isinstance(G, str):
-            self.G = getattr(generators, G)()
-        # if not, G is a a network so set it
-        else:
-            self.G = G
-
-    def set_discriminator(self, D):
-        # if D is a string, find that model in the discriminators.py and create it
-        if isinstance(D, str):
-            self.D = getattr(discriminators, D)()
-        # if not, D is a a network so set it
-        else:
-            self.D = D
-
-    def set_perceptual(self, after_activation=False):
+    def use_perceptual(self, after_activation=False):
         # this is from DeblurGANv2
         # TODO: ESRGAN's perceptual loss version
         conv_3_3_layer = 14
@@ -50,37 +36,72 @@ class Model(nn.Module):
                 break
         self.P = perceptual
 
-    def set_optimizers(self, optimizer='AdamP', lr=1e-4, betas=(0.9, 0.999), weight_decay=0, nesterov=False):
+    def set_resconstruction_loss(self, loss_functions=[nn.MSELoss], weights=[1.0]):
+        def weighted_loss(input_, target):
+            total = 0
+            for (func, weight) in zip(loss_functions, weights):
+                total += func(input_, target)*weight
+            return total
+        self.reconstruction_loss = weighted_loss
+
+    def set_adversarial_loss(self, loss_functions=[nn.BCEWithLogitsLoss], weights=[1.0]):
+        def weighted_loss(input_, target):
+            total = 0
+            for (func, weight) in zip(loss_functions, weights):
+                total += func(input_, target)*weight
+            return total
+        self.adversarial_loss = weighted_loss
+
+    def set_perceptual_loss(self, loss_functions=[nn.L1Loss], weights=[1.0]):
+        def weighted_loss(input_, target):
+            total = 0
+            for (func, weight) in zip(loss_functions, weights):
+                total += func(input_, target)*weight
+            return total
+        self.perceptual_loss = weighted_loss
+
+    def set_G_optimizer(self, optimizer='AdamP', lr=1e-4, betas=(0.9, 0.999), weight_decay=0, nesterov=False):
         # note that lucidrains uses betas=(0.5, 0.9) for stylegan
         # https://github.com/lucidrains/stylegan2-pytorch/blob/master/stylegan2_pytorch/stylegan2_pytorch.py#L565
 
         if optimizer=='Adam':
-            self.G_opt = Adam(self.G.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-            self.D_opt = Adam(self.D.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+            self.G_optimizer = Adam(self.G.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
         elif optimizer=='AdamP':
-            self.G_opt = AdamP(self.G.parameters(), lr=lr, betas=betas, weight_decay=weight_decay, nesterov=nesterov)
-            self.D_opt = AdamP(self.D.parameters(), lr=lr, betas=betas, weight_decay=weight_decay, nesterov=nesterov)
+            self.G_optimizer = AdamP(self.G.parameters(), lr=lr, betas=betas, weight_decay=weight_decay, nesterov=nesterov)
         else:
             #TODO: other optimizers, maybe from the torch_optimizers package
             raise NotImplementedError('nope')
 
-    def parallelize(self, device_ids, output_device):
-        self.G = nn.parallel.DistributedDataParallel(self.G, device_ids=device_ids, output_device=output_device)
-        if self.D is not None:
-            self.D = nn.parallel.DistributedDataParallel(self.D, device_ids=device_ids, output_device=output_device)
-        if self.P is not None:
-            self.P = nn.parallel.DistributedDataParallel(self.P, device_ids=device_ids, output_device=output_device)
+    def set_D_optimizer(self, optimizer='AdamP', lr=1e-4, betas=(0.9, 0.999), weight_decay=0, nesterov=False):
+        # note that lucidrains uses betas=(0.5, 0.9) for stylegan
+        # https://github.com/lucidrains/stylegan2-pytorch/blob/master/stylegan2_pytorch/stylegan2_pytorch.py#L565
+
+        if optimizer=='Adam':
+            self.D_optimizer = Adam(self.D.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+        elif optimizer=='AdamP':
+            self.D_optimizer = AdamP(self.D.parameters(), lr=lr, betas=betas, weight_decay=weight_decay, nesterov=nesterov)
+        else:
+            #TODO: other optimizers, maybe from the torch_optimizers package
+            raise NotImplementedError('nope')
 
     def save(self, model_path):
-        torch.save({'G':self.G.state_dict(),
-                    'D':self.D.state_dict(),
-                    'optimizer_G': self.G_opt.state_dict(),
-                    'optimizer_D': self.D_opt.state_dict()},
+        if isinstance(self.G, DataParallel) or isinstance(self.G, DistributedDataParallel):
+            G_state_dict = self.G.module.state_dict()
+            D_state_dict = self.D.module.state_dict()
+        else:
+            G_state_dict = self.G.state_dict()
+            D_state_dict = self.D.state_dict()
+        torch.save({'G':G_state_dict,
+                    'D':D_state_dict,
+                    'optimizer_G': self.G_optimizer.state_dict(),
+                    'optimizer_D': self.D_optimizer.state_dict()},
                    model_path)
 
-    def load(self, model_path, isStrict=False):
-        checkpoint = torch.load(model_path)
+    def load(self, model_path, isStrict=False, map_location='cpu'):
+        # don't care about distributed here
+        # trainer should take care of it after loading the parameters
+        checkpoint = torch.load(model_path, map_location=map_location)
         self.G.load_state_dict(checkpoint['G'], strict=isStrict)
         self.D.load_state_dict(checkpoint['D'], strict=isStrict)
-        self.G_opt.load_state_dict(checkpoint['optimizer_G'], strict=isStrict)
-        self.D_opt.load_state_dict(checkpoint['optimizer_D'], strict=isStrict)
+        self.G_optimizer.load_state_dict(checkpoint['optimizer_G'])
+        self.D_optimizer.load_state_dict(checkpoint['optimizer_D'])

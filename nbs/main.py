@@ -117,9 +117,9 @@ def main(args):
                                           )
 
     gan_model = MSResNet.GAN(args)
-    trainer = pl.Trainer(gpus=2, 
+    trainer = pl.Trainer(gpus=args.num_gpu, 
                          fast_dev_run=False,
-                         distributed_backend='ddp',
+                         distributed_backend='ddp' if args.num_gpu>1 else 'dp',
                          max_epochs=100,
                          logger=wandb_logger,
                          checkpoint_callback=checkpoint_callback,
@@ -132,6 +132,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='It is time for more... experiments.')
     parser.add_argument('--model_name', type=str, default='MSResNet', help='model name')
     parser.add_argument('--batch_size', type=int, default=8, help='input batch size for training')
+    parser.add_argument('--num_gpu', type=int, default=2, help='number of gpus to use')
     parser.add_argument('--num_workers', type=int, default=8, help='the number of dataloader workers')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
     parser.add_argument('--betas', type=float, nargs=2, default=(0.9, 0.999), help='ADAM betas')
@@ -147,5 +148,7 @@ if __name__ == "__main__":
     parser.add_argument('--milestones', type=int, nargs='+', default=[500, 750, 900], help='learning rate decay per N epochs')
     parser.add_argument('--root_folder', type=str, default='/storage/projects/all_datasets/GOPRO/train/', help='root folder')
     parser.add_argument('--image_pair_list', type=str, default='/storage/projects/all_datasets/GOPRO/train/train_image_pair_list.txt', help='image list')
+    parser.add_argument('--coop_gan', type=int, default=None, help='the epoch to start cooperative adversarial training')
+    parser.add_argument('--flood', type=int, default=0, help='flood loss lambda')
     args = parser.parse_args()
     main(args)

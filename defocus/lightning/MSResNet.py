@@ -54,6 +54,10 @@ class GAN(pl.LightningModule):
         self.generated_imgs = None
         self.last_imgs = None
 
+
+        self.reduced_loss_g_adversarial = 0
+        self.reduced_loss_d = 0
+
     def set_weighted_loss(self, loss_functions=[nn.BCEWithLogitsLoss], weights=[1.0]):
         def weighted_loss(input_, target):
             total = 0
@@ -76,7 +80,7 @@ class GAN(pl.LightningModule):
 
         scheduler_d = torch.optim.lr_scheduler.MultiStepLR(opt_d, milestones=[500,750,900], gamma=0.5)
         scheduler_g = torch.optim.lr_scheduler.MultiStepLR(opt_g, milestones=[500,750,900], gamma=0.5)
-        return [opt_d, opt_g], [scheduler_d, scheduler_g]
+        return [opt_d, opt_g], []#[scheduler_d, scheduler_g]
 
     def train_dataloader(self):
         train_dataset = self.Dataset(root_folder=self.hparams.root_folder,
@@ -116,6 +120,10 @@ class GAN(pl.LightningModule):
                 label_real = label_real.cuda(high_res_output.device.index)
 
             loss_d = self.adversarial_loss(d_fake, label_fake) + self.adversarial_loss(d_real, label_real)
+            # this is unnecessary but I will use it for flood loss (maybe) and adaptive no-gan
+            reduced_loss_d = loss_d.clone()
+            torch.distributed.all_reduce_multigpu([reduced_loss_d], op=torch.distributed.ReduceOp.SUM)
+            self.reduced_loss_d = reduced_loss_d.item()
 
             tqdm_dict = {'loss_d': loss_d.item()}
             losses_and_logs = OrderedDict({
@@ -136,13 +144,38 @@ class GAN(pl.LightningModule):
             loss_g_adversarial = self.adversarial_loss(d_fake_with_gradient, label_real)
             loss_g = loss_g_adversarial + loss_g_rec
 
-            tqdm_dict = {'loss_g': loss_g, 'loss_g_adversarial': loss_g_adversarial}
+            # again, this is unnecessary but I will use it for flood loss (maybe) and adaptive no-gan
+            reduced_loss_g_adversarial = loss_g_adversarial.clone()
+            torch.distributed.all_reduce_multigpu([reduced_loss_g_adversarial], op=torch.distributed.ReduceOp.SUM)
+            self.reduced_loss_g_adversarial = reduced_loss_g_adversarial.item()
+
+
+
+            tqdm_dict = {'loss_g': loss_g.item(), 'loss_g_adversarial': loss_g_adversarial.item()}
             losses_and_logs = OrderedDict({
                 'loss': loss_g,
                 'progress_bar': tqdm_dict,
                 'log': tqdm_dict
             })
             return losses_and_logs
+
+
+    def optimizer_step(self, current_epoch, batch_idx, optimizer, optimizer_idx,
+                       second_order_closure=None, on_tpu=False, using_native_amp=True, using_lbfgs=False):
+        # while updating the discriminator...
+        if optimizer_idx == 0:
+            if self.reduced_loss_g_adversarial < 2.0:
+                self.trainer.scaler.step(optimizer)
+                optimizer.zero_grad()
+            else:
+                optimizer.zero_grad()
+        # while updating the generator...
+        if optimizer_idx == 1:
+            if self.reduced_loss_d < 2.0:
+                self.trainer.scaler.step(optimizer)
+                optimizer.zero_grad()
+            else:
+                optimizer.zero_grad()
 
     def on_epoch_end(self):
         pass

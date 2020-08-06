@@ -54,6 +54,9 @@ class GAN(pl.LightningModule):
         self.generated_imgs = None
         self.last_imgs = None
 
+        if self.hparams.flood_loss != 0:
+            assert self.hparams.stop_loss is not None, "Can't do flood loss with stop loss"
+
 
         self.reduced_loss_g_adversarial = 0
         self.reduced_loss_d = 0
@@ -120,10 +123,12 @@ class GAN(pl.LightningModule):
                 label_real = label_real.cuda(high_res_output.device.index)
 
             loss_d = self.adversarial_loss(d_fake, label_fake) + self.adversarial_loss(d_real, label_real)
-            # this is unnecessary but I will use it for flood loss (maybe) and adaptive no-gan
+            if self.hparams.flood_loss != 0:
+                loss_d = (loss_d-self.hparams.flood_loss).abs()+self.hparams.flood_loss
+            # this is unnecessary but I will use it for flood loss (maybe) and coop-gan
             reduced_loss_d = loss_d.clone()
             torch.distributed.all_reduce_multigpu([reduced_loss_d], op=torch.distributed.ReduceOp.SUM)
-            self.reduced_loss_d = reduced_loss_d.item()
+            self.reduced_loss_d = reduced_loss_d.item() / self.hparams.num_gpu
 
             tqdm_dict = {'loss_d': loss_d.item()}
             losses_and_logs = OrderedDict({
@@ -142,14 +147,14 @@ class GAN(pl.LightningModule):
                 label_real = label_real.cuda(high_res_output.device.index)
 
             loss_g_adversarial = self.adversarial_loss(d_fake_with_gradient, label_real)
+            if self.hparams.flood_loss != 0:
+                loss_g_adversarial = (loss_g_adversarial-self.hparams.flood_loss).abs()+self.hparams.flood_loss
             loss_g = loss_g_adversarial + loss_g_rec
 
-            # again, this is unnecessary but I will use it for flood loss (maybe) and adaptive no-gan
+            # again, this is unnecessary but I will use it for flood loss (maybe) and coop-gan
             reduced_loss_g_adversarial = loss_g_adversarial.clone()
             torch.distributed.all_reduce_multigpu([reduced_loss_g_adversarial], op=torch.distributed.ReduceOp.SUM)
-            self.reduced_loss_g_adversarial = reduced_loss_g_adversarial.item()
-
-
+            self.reduced_loss_g_adversarial = reduced_loss_g_adversarial.item() / self.hparams.num_gpu
 
             tqdm_dict = {'loss_g': loss_g.item(), 'loss_g_adversarial': loss_g_adversarial.item()}
             losses_and_logs = OrderedDict({
@@ -162,24 +167,39 @@ class GAN(pl.LightningModule):
 
     def optimizer_step(self, current_epoch, batch_idx, optimizer, optimizer_idx,
                        second_order_closure=None, on_tpu=False, using_native_amp=True, using_lbfgs=False):
-        # while updating the discriminator...
-        if optimizer_idx == 0:
-            if self.reduced_loss_g_adversarial < 2.0:
+        if self.hparams.stop_loss is not None and self.current_epoch > self.hparams.stop_loss:
+            # while updating the discriminator...
+            if optimizer_idx == 0:
+                # if generator is losing too much
+                if self.reduced_loss_g_adversarial > 2.0:
+                    # don't update the discriminator
+                    optimizer.zero_grad()
+                else:
+                    # but update the discrimininator if the generator is not losing too much
+                    self.trainer.scaler.step(optimizer)
+                    optimizer.zero_grad()
+            # while updating the generator...
+            if optimizer_idx == 1:
+                # if the discriminator is losing too much
+                if self.reduced_loss_d > 2.0:
+                    # don't update the generator
+                    optimizer.zero_grad()
+                else:
+                    # but update the generator if the discriminator is not losing too much
+                    self.trainer.scaler.step(optimizer)
+                    optimizer.zero_grad()
+        # default optimization
+        else:
+            if torch.distributed.is_initialized():
                 self.trainer.scaler.step(optimizer)
                 optimizer.zero_grad()
             else:
-                optimizer.zero_grad()
-        # while updating the generator...
-        if optimizer_idx == 1:
-            if self.reduced_loss_d < 2.0:
-                self.trainer.scaler.step(optimizer)
-                optimizer.zero_grad()
-            else:
+                optimizer.step()
                 optimizer.zero_grad()
 
     def on_epoch_end(self):
-        pass
+#         pass
         # not working, wandb does not upload the images
-#         out = self(self.last_imgs)
-#         image = out[-1][0].detach().cpu().numpy().transpose(1,2,0)
-#         self.logger.experiment.log({"examples": [wandb.Image(image, caption="output")]})
+        out = self(self.last_imgs)
+        image = out[-1][0].detach().cpu().numpy().transpose(1,2,0)
+        self.logger.experiment.log({"examples": [wandb.Image(image, caption="output")]})

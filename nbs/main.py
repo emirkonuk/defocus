@@ -90,7 +90,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 def main(args):
     pl.seed_everything(42)
-    experiment_name = '_'.join([args.model_name, str(args.batch_size), str(args.lr), 'nightly'])
+    experiment_name = '_'.join([args.model_name, str(args.batch_size), str(args.lr)])
     wandb_logger = WandbLogger(name=experiment_name,
                                project='defocus',
                                log_model=True,
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     parser.add_argument('--milestones', type=int, nargs='+', default=[500, 750, 900], help='learning rate decay per N epochs')
     parser.add_argument('--root_folder', type=str, default='/storage/projects/all_datasets/GOPRO/train/', help='root folder')
     parser.add_argument('--image_pair_list', type=str, default='/storage/projects/all_datasets/GOPRO/train/train_image_pair_list.txt', help='image list')
-    parser.add_argument('--coop_gan', type=int, default=None, help='the epoch to start cooperative adversarial training')
-    parser.add_argument('--flood', type=int, default=0, help='flood loss lambda')
+    parser.add_argument('--stop_loss', type=int, default=None, help='the epoch to start cooperative adversarial training')
+    parser.add_argument('--flood_loss', type=int, default=0, help='flood loss b threshold')
     args = parser.parse_args()
     main(args)

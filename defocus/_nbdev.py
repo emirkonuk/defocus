@@ -2,7 +2,7 @@
 
 __all__ = ["index", "modules", "custom_doc_links", "git_url"]
 
-index = {"Model": "01_model.ipynb",
+index = {"GAN": "01_model.ipynb",
          "ResBlock": "02_architecture_common.ipynb",
          "ResNet": "02_architecture_common.ipynb",
          "UpConv2D": "02_architecture_common.ipynb",
@@ -24,7 +24,7 @@ index = {"Model": "01_model.ipynb",
          "rand_translation": "99_diffaugment.ipynb",
          "rand_cutout": "99_diffaugment.ipynb",
          "AUGMENT_FNS": "99_diffaugment.ipynb",
-         "GAN": "lightning_trial.ipynb"}
+         "Model": "model_without_lightning.ipynb"}
 
 modules = ["model.py",
            "architecture/common.py",
@@ -33,7 +33,7 @@ modules = ["model.py",
            "data/MSResNet.py",
            "trainers/MSResNet.py",
            "data/diffaugment.py",
-           "lightning/MSResNet.py"]
+           "model_without_lightning.py"]
 
 doc_url = "https://emirkonuk.github.io/defocus/"
 

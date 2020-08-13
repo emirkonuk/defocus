@@ -82,7 +82,8 @@ def main_worker(device_id, args, seed=0):
 '''
 
 import argparse
-from defocus.lightning import MSResNet
+# from defocus.lightning import MSResNet
+from defocus import model
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 import os
@@ -116,12 +117,12 @@ def main(args):
                                           prefix='',
                                           )
 
-    gan_model = MSResNet.GAN(args)
+    gan_model = model.GAN(args)
     trainer = pl.Trainer(gpus=args.num_gpu, 
                          fast_dev_run=False,
                          distributed_backend='ddp' if args.num_gpu>1 else 'dp',
                          max_epochs=100,
-                         logger=wandb_logger,
+                         logger=None,#wandb_logger,
                          checkpoint_callback=checkpoint_callback,
                          callbacks=[ModelCheckpointAtEpochEnd()],
                          precision=16 if args.fp16 else 32,

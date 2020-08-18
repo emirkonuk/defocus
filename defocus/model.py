@@ -6,6 +6,7 @@ __all__ = ['GAN']
 import importlib
 import torch
 import torch.nn as nn
+import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
@@ -83,7 +84,7 @@ class GAN(pl.LightningModule):
 
         scheduler_d = torch.optim.lr_scheduler.MultiStepLR(opt_d, milestones=[500,750,900], gamma=0.5)
         scheduler_g = torch.optim.lr_scheduler.MultiStepLR(opt_g, milestones=[500,750,900], gamma=0.5)
-        return [opt_d, opt_g], []#[scheduler_d, scheduler_g]
+        return [opt_d, opt_g], [scheduler_d, scheduler_g]
 
     def train_dataloader(self):
         train_dataset = self.Dataset(root_folder=self.hparams.root_folder,
@@ -91,11 +92,12 @@ class GAN(pl.LightningModule):
                                     )
         return DataLoader(train_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers)
 
-#     def val_dataloader(self):
-#         val_dataset = self.Dataset(root_folder='/storage/projects/all_datasets/GOPRO/train/',
-#                                           image_pair_list='/storage/projects/all_datasets/GOPRO/train/val_image_pair_list.txt',
-#                                          )
-#         return DataLoader(val_dataset, batch_size=self.hparams.batch_size)
+    def val_dataloader(self):
+        val_dataset = self.Dataset(root_folder=self.hparams.root_folder,
+                                   image_pair_list=self.hparams.val_image_pair_list,
+                                   mode='validation',
+                                  )
+        return DataLoader(val_dataset, batch_size=1, num_workers=self.hparams.num_workers)
 
     def forward(self, input_):
         return self.G(input_)
@@ -164,6 +166,49 @@ class GAN(pl.LightningModule):
             })
             return losses_and_logs
 
+    def validation_step(self, batch, batch_idx):
+        input_, target = batch
+
+        output = self.G(input_)
+
+        loss_g_rec = 0
+        for scaled_output, scaled_target in zip(output, target):
+            loss_g_rec += self.reconstruction_loss(scaled_output, scaled_target)
+        high_res_output = output[-1]
+        high_res_target = target[-1]
+        self.val_images = high_res_output
+        d_fake = self.D(high_res_output.detach())
+        d_real = self.D(high_res_target)
+        label_fake = torch.zeros_like(d_fake)
+        label_real = torch.ones_like(d_real)
+        if self.on_gpu:
+            label_fake = label_fake.cuda(high_res_output.device.index)
+            label_real = label_real.cuda(high_res_output.device.index)
+        loss_d = self.adversarial_loss(d_fake, label_fake) + self.adversarial_loss(d_real, label_real)
+        d_fake_with_gradient = self.D(high_res_output)
+        label_real = torch.ones_like(d_fake_with_gradient)
+        if self.on_gpu:
+            label_real = label_real.cuda(high_res_output.device.index)
+        loss_g_adversarial = self.adversarial_loss(d_fake_with_gradient, label_real)
+        loss_g = loss_g_adversarial + loss_g_rec
+
+        logs = {'val_loss_d': loss_d.item(),
+            'val_loss_g_adversarial': loss_g_adversarial.item(),
+            'val_loss_g': loss_g.item()
+            }
+#         logs = {'val_loss': val_dict}
+        return logs
+
+    def validation_epoch_end(self, outputs):
+        avg_loss_d = np.asarray([x['val_loss_d'] for x in outputs]).mean()
+        avg_val_loss_g_adversarial = np.asarray([x['val_loss_g_adversarial'] for x in outputs]).mean()
+        avg_val_loss_g = np.asarray([x['val_loss_g'] for x in outputs]).mean()
+        logs = {'val_loss_d': avg_loss_d,
+                'val_loss_g_adversarial': avg_val_loss_g_adversarial,
+                'val_loss_g': avg_val_loss_g
+                }
+        return {'val_loss': avg_val_loss_g, 'log': logs}
+
 
     def optimizer_step(self, current_epoch, batch_idx, optimizer, optimizer_idx,
                        second_order_closure=None, on_tpu=False, using_native_amp=True, using_lbfgs=False):
@@ -198,8 +243,10 @@ class GAN(pl.LightningModule):
                 optimizer.zero_grad()
 
     def on_epoch_end(self):
-#         pass
-        # not working, wandb does not upload the images
-        out = self(self.last_imgs)
-        image = out[-1][0].detach().cpu().numpy().transpose(1,2,0)
-        self.logger.experiment.log({"examples": [wandb.Image(image, caption="output")]})
+        if self.logger is not None:
+#             out = self(self.val_images)
+#             image = out[-1][0].detach().cpu().numpy().transpose(1,2,0)
+            image = self.val_images[0].detach().cpu().numpy().transpose(1,2,0)
+            self.logger.experiment.log({"examples": [wandb.Image(image, caption="output")]})
+        else:
+            pass

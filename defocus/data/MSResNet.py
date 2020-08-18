@@ -55,8 +55,8 @@ class Dataset(data.Dataset):
         input_ = cv2.imread(self.input_list[idx])[:,:,::-1]
         target = cv2.imread(self.target_list[idx])[:,:,::-1]
 
-        # if testing, no nothing
-        if self.mode=='test':
+        # if testing, do nothing
+        if self.mode=='test' or self.mode=='validation':
             pass
         else:
             H, W, C = input_.shape

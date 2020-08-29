@@ -122,7 +122,7 @@ def main(args):
                          fast_dev_run=False,
                          distributed_backend='ddp' if args.num_gpu>1 else 'dp',
                          max_epochs=100,
-                         logger=wandb_logger,
+                         logger=wandb_logger if args.upload else None,
                          checkpoint_callback=checkpoint_callback,
                         #  callbacks=[ModelCheckpointAtEpochEnd()],
                          precision=16 if args.fp16 else 32,
@@ -152,5 +152,7 @@ if __name__ == "__main__":
     parser.add_argument('--val_image_pair_list', type=str, default='/storage/ekonuk/projects/all_datasets/GOPRO/train/val_image_pair_list.txt', help='val image list')
     parser.add_argument('--stop_loss', type=int, default=None, help='the epoch to start cooperative adversarial training')
     parser.add_argument('--flood_loss', type=int, default=0, help='flood loss b threshold')
+    parser.add_argument('--val_metric', type=str, nargs='+', default=['SSIM', 'PSNR'], help='validation evaluation metrics')
+    parser.add_argument('--upload', action='store_false', help='if selected, will not upload')
     args = parser.parse_args()
     main(args)

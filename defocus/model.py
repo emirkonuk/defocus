@@ -14,6 +14,10 @@ import argparse
 from collections import OrderedDict
 from adamp import AdamP
 import wandb
+import torch
+import torchvision
+
+from .metrics import PSNR, SSIM
 
 class GAN(pl.LightningModule):
 
@@ -61,6 +65,11 @@ class GAN(pl.LightningModule):
 
         self.reduced_loss_g_adversarial = 0
         self.reduced_loss_d = 0
+
+        if 'SSIM' in self.hparams.val_metric:
+            self.SSIM = SSIM()
+        if 'PSNR' in self.hparams.val_metric:
+            self.PSNR = PSNR()
 
     def set_weighted_loss(self, loss_functions=[nn.BCEWithLogitsLoss], weights=[1.0]):
         def weighted_loss(input_, target):
@@ -158,7 +167,8 @@ class GAN(pl.LightningModule):
             torch.distributed.all_reduce_multigpu([reduced_loss_g_adversarial], op=torch.distributed.ReduceOp.SUM)
             self.reduced_loss_g_adversarial = reduced_loss_g_adversarial.item() / self.hparams.num_gpu
 
-            tqdm_dict = {'loss_g': loss_g.item(), 'loss_g_adversarial': loss_g_adversarial.item()}
+            tqdm_dict = {'loss_g': loss_g.item(),
+                         'loss_g_adversarial': loss_g_adversarial.item()}
             losses_and_logs = OrderedDict({
                 'loss': loss_g,
                 'progress_bar': tqdm_dict,
@@ -176,7 +186,8 @@ class GAN(pl.LightningModule):
             loss_g_rec += self.reconstruction_loss(scaled_output, scaled_target)
         high_res_output = output[-1]
         high_res_target = target[-1]
-        self.val_images = high_res_output
+        self.val_images = [high_res_output, high_res_target]
+
         d_fake = self.D(high_res_output.detach())
         d_real = self.D(high_res_target)
         label_fake = torch.zeros_like(d_fake)
@@ -192,20 +203,27 @@ class GAN(pl.LightningModule):
         loss_g_adversarial = self.adversarial_loss(d_fake_with_gradient, label_real)
         loss_g = loss_g_adversarial + loss_g_rec
 
+        PSNR = self.PSNR(high_res_output, high_res_target)
+        SSIM = self.SSIM(high_res_output, high_res_target)
         logs = {'val_loss_d': loss_d.item(),
-            'val_loss_g_adversarial': loss_g_adversarial.item(),
-            'val_loss_g': loss_g.item()
+                'val_loss_g_adversarial': loss_g_adversarial.item(),
+                'val_loss_g': loss_g.item(),
+                'PSNR': PSNR.item(),
+                'SSIM': SSIM.item(),
             }
-#         logs = {'val_loss': val_dict}
         return logs
 
     def validation_epoch_end(self, outputs):
         avg_loss_d = np.asarray([x['val_loss_d'] for x in outputs]).mean()
         avg_val_loss_g_adversarial = np.asarray([x['val_loss_g_adversarial'] for x in outputs]).mean()
         avg_val_loss_g = np.asarray([x['val_loss_g'] for x in outputs]).mean()
+        avg_PSNR = np.asarray([x['PSNR'] for x in outputs]).mean()
+        avg_SSIM = np.asarray([x['SSIM'] for x in outputs]).mean()
         logs = {'val_loss_d': avg_loss_d,
                 'val_loss_g_adversarial': avg_val_loss_g_adversarial,
-                'val_loss_g': avg_val_loss_g
+                'val_loss_g': avg_val_loss_g,
+                'val_PSNR': avg_PSNR,
+                'val_SSIM': avg_SSIM,
                 }
         return {'val_loss': avg_val_loss_g, 'log': logs}
 
@@ -244,9 +262,9 @@ class GAN(pl.LightningModule):
 
     def on_epoch_end(self):
         if self.logger is not None:
-#             out = self(self.val_images)
-#             image = out[-1][0].detach().cpu().numpy().transpose(1,2,0)
-            image = self.val_images[0].detach().cpu().numpy().transpose(1,2,0)
-            self.logger.experiment.log({"examples": [wandb.Image(image, caption="output")]})
+            output = self.val_images[0][0].detach().cpu().numpy().transpose(1,2,0)
+            target = self.val_images[1][0].detach().cpu().numpy().transpose(1,2,0)
+            self.logger.experiment.log({"validation images": [wandb.Image(output, caption="output"),
+                                                              wandb.Image(target, caption="target")]})
         else:
             pass

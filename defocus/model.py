@@ -253,7 +253,7 @@ class GAN(pl.LightningModule):
                     optimizer.zero_grad()
         # default optimization
         else:
-            if torch.distributed.is_initialized():
+            if self.hparams.fp16:
                 self.trainer.scaler.step(optimizer)
                 optimizer.zero_grad()
             else:

@@ -32,10 +32,11 @@ class GAN(pl.LightningModule):
         data = importlib.import_module('defocus.data.' + self.hparams.model_name)
         self.Dataset = data.Dataset
 
-        self.adversarial_loss = self.set_weighted_loss(loss_functions=[getattr(nn, funcname)() for funcname in self.hparams.adv_loss[0::2]],
+
+        self.adversarial_criterion = self.set_weighted_criterion(loss_functions=[getattr(nn, funcname)() for funcname in self.hparams.adv_loss[0::2]],
                                                   weights=[float(weight) for weight in self.hparams.adv_loss[1::2]],
                                                  )
-        self.reconstruction_loss = self.set_weighted_loss(loss_functions=[getattr(nn, funcname)() for funcname in self.hparams.rec_loss[0::2]],
+        self.reconstruction_criterion = self.set_weighted_criterion(loss_functions=[getattr(nn, funcname)() for funcname in self.hparams.rec_loss[0::2]],
                                                   weights=[float(weight) for weight in self.hparams.rec_loss[1::2]],
                                                  )
 
@@ -51,7 +52,7 @@ class GAN(pl.LightningModule):
                 if i == conv_3_3_layer:
                     break
             self.P = perceptual
-            self.perceptual_loss = self.set_weighted_loss(loss_functions=[getattr(nn, funcname)() for funcname in self.hparams.per_loss[0::2]],
+            self.perceptual_criterion = self.set_weighted_criterion(loss_functions=[getattr(nn, funcname)() for funcname in self.hparams.per_loss[0::2]],
                                                       weights=[float(weight) for weight in self.hparams.per_loss[1::2]],
                                                      )
 
@@ -71,13 +72,13 @@ class GAN(pl.LightningModule):
         if 'PSNR' in self.hparams.val_metric:
             self.PSNR = PSNR()
 
-    def set_weighted_loss(self, loss_functions=[nn.BCEWithLogitsLoss], weights=[1.0]):
-        def weighted_loss(input_, target):
+    def set_weighted_criterion(self, loss_functions=[nn.BCEWithLogitsLoss()], weights=[1.0]):
+        def weighted_criterion(input_, target):
             total = 0
             for (func, weight) in zip(loss_functions, weights):
                 total += func(input_, target)*weight
             return total
-        return weighted_loss
+        return weighted_criterion
 
     def configure_optimizers(self):
         lr = self.hparams.lr
@@ -111,6 +112,32 @@ class GAN(pl.LightningModule):
     def forward(self, input_):
         return self.G(input_)
 
+    def calculate_D_loss(self, pred_fake, label_fake, pred_real, label_real):
+        if self.hparams.GAN_type == 'NonSaturating':
+            loss_d = self.adversarial_criterion(pred_fake, label_fake) + self.adversarial_criterion(pred_real, label_real)
+        elif self.hparams.GAN_type == 'Relativistic':
+            # note that pred_fake is detached - no gradient to the generator
+            loss_d = 0.5*(self.adversarial_criterion(pred_real - torch.mean(pred_fake), label_real) +
+                          self.adversarial_criterion(pred_fake - torch.mean(pred_real), label_fake)
+                          )
+            # 0.5 multiplier is from DeblurGANv2 implementation, probably useless but hyperparams are hyperparams
+        else:
+            raise NotImplementedError
+        return loss_d
+
+    def calculate_G_loss(self, pred_fake_with_gradient, label_real, pred_real = None, label_fake = None):
+        if self.hparams.GAN_type == 'NonSaturating':
+            loss_g_adversarial = self.adversarial_criterion(pred_fake_with_gradient, label_real)
+        elif self.hparams.GAN_type == 'Relativistic':
+            # note that pred_fake_with_gradient has a gradient for the generator
+            loss_g_adversarial = 0.5*(self.adversarial_criterion(pred_real - torch.mean(pred_fake_with_gradient), label_fake) +
+                                      self.adversarial_criterion(pred_fake_with_gradient - torch.mean(pred_real), label_real)
+                                      )
+            # 0.5 multiplier is from DeblurGANv2 implementation, probably useless but hyperparams are hyperparams
+        else:
+            raise NotImplementedError
+        return loss_g_adversarial
+
     def training_step(self, batch, batch_idx, optimizer_idx):
         input_, target = batch
         self.last_imgs = input_
@@ -118,28 +145,29 @@ class GAN(pl.LightningModule):
         output = self.G(input_)
         loss_g_rec = 0
         for scaled_output, scaled_target in zip(output, target):
-            loss_g_rec += self.reconstruction_loss(scaled_output, scaled_target)
+            loss_g_rec += self.reconstruction_criterion(scaled_output, scaled_target)
         high_res_output = output[-1]
         high_res_target = target[-1]
 
         # train discriminator
         if optimizer_idx == 0:
-            d_fake = self.D(high_res_output.detach())
-            d_real = self.D(high_res_target)
+            pred_fake = self.D(high_res_output.detach())
+            pred_real = self.D(high_res_target)
 
-            label_fake = torch.zeros_like(d_fake)
-            label_real = torch.ones_like(d_real)
+            label_fake = torch.zeros_like(pred_fake)
+            label_real = torch.ones_like(pred_real)
             if self.on_gpu:
                 label_fake = label_fake.cuda(high_res_output.device.index)
                 label_real = label_real.cuda(high_res_output.device.index)
 
-            loss_d = self.adversarial_loss(d_fake, label_fake) + self.adversarial_loss(d_real, label_real)
+            loss_d = self.calculate_D_loss(pred_fake, label_fake, pred_real, label_real)
             if self.hparams.flood_loss != 0:
                 loss_d = (loss_d-self.hparams.flood_loss).abs()+self.hparams.flood_loss
+
             # this is unnecessary but I will use it for flood loss (maybe) and coop-gan
-            reduced_loss_d = loss_d.clone()
-            torch.distributed.all_reduce_multigpu([reduced_loss_d], op=torch.distributed.ReduceOp.SUM)
-            self.reduced_loss_d = reduced_loss_d.item() / self.hparams.num_gpu
+#             reduced_loss_d = loss_d.clone()
+#             torch.distributed.all_reduce_multigpu([reduced_loss_d], op=torch.distributed.ReduceOp.SUM)
+#             self.reduced_loss_d = reduced_loss_d.item() / self.hparams.num_gpu
 
             tqdm_dict = {'loss_d': loss_d.item()}
             losses_and_logs = OrderedDict({
@@ -151,21 +179,30 @@ class GAN(pl.LightningModule):
 
         # train generator
         if optimizer_idx == 1:
-            d_fake_with_gradient = self.D(high_res_output)
+            pred_fake_with_gradient = self.D(high_res_output)
 
-            label_real = torch.ones_like(d_fake_with_gradient)
+            label_real = torch.ones_like(pred_fake_with_gradient)
             if self.on_gpu:
                 label_real = label_real.cuda(high_res_output.device.index)
 
-            loss_g_adversarial = self.adversarial_loss(d_fake_with_gradient, label_real)
+            if self.hparams.GAN_type == 'Relativistic':
+                pred_real = self.D(high_res_target)
+                label_fake = torch.zeros_like(pred_fake_with_gradient)
+                if self.on_gpu:
+                    label_fake = label_fake.cuda(high_res_output.device.index)
+            else:
+                label_fake = None
+                pred_real = None
+
+            loss_g_adversarial = self.calculate_G_loss(pred_fake_with_gradient, label_real, pred_real, label_fake)
             if self.hparams.flood_loss != 0:
                 loss_g_adversarial = (loss_g_adversarial-self.hparams.flood_loss).abs()+self.hparams.flood_loss
             loss_g = loss_g_adversarial + loss_g_rec
 
             # again, this is unnecessary but I will use it for flood loss (maybe) and coop-gan
-            reduced_loss_g_adversarial = loss_g_adversarial.clone()
-            torch.distributed.all_reduce_multigpu([reduced_loss_g_adversarial], op=torch.distributed.ReduceOp.SUM)
-            self.reduced_loss_g_adversarial = reduced_loss_g_adversarial.item() / self.hparams.num_gpu
+#             reduced_loss_g_adversarial = loss_g_adversarial.clone()
+#             torch.distributed.all_reduce_multigpu([reduced_loss_g_adversarial], op=torch.distributed.ReduceOp.SUM)
+#             self.reduced_loss_g_adversarial = reduced_loss_g_adversarial.item() / self.hparams.num_gpu
 
             tqdm_dict = {'loss_g': loss_g.item(),
                          'loss_g_adversarial': loss_g_adversarial.item()}
@@ -183,24 +220,24 @@ class GAN(pl.LightningModule):
 
         loss_g_rec = 0
         for scaled_output, scaled_target in zip(output, target):
-            loss_g_rec += self.reconstruction_loss(scaled_output, scaled_target)
+            loss_g_rec += self.reconstruction_criterion(scaled_output, scaled_target)
         high_res_output = output[-1]
         high_res_target = target[-1]
         self.val_images = [high_res_output, high_res_target]
 
-        d_fake = self.D(high_res_output.detach())
-        d_real = self.D(high_res_target)
-        label_fake = torch.zeros_like(d_fake)
-        label_real = torch.ones_like(d_real)
+        pred_fake = self.D(high_res_output.detach())
+        pred_real = self.D(high_res_target)
+        label_fake = torch.zeros_like(pred_fake)
+        label_real = torch.ones_like(pred_real)
         if self.on_gpu:
             label_fake = label_fake.cuda(high_res_output.device.index)
             label_real = label_real.cuda(high_res_output.device.index)
-        loss_d = self.adversarial_loss(d_fake, label_fake) + self.adversarial_loss(d_real, label_real)
-        d_fake_with_gradient = self.D(high_res_output)
-        label_real = torch.ones_like(d_fake_with_gradient)
+        loss_d = self.adversarial_criterion(pred_fake, label_fake) + self.adversarial_criterion(pred_real, label_real)
+        pred_fake_with_gradient = self.D(high_res_output)
+        label_real = torch.ones_like(pred_fake_with_gradient)
         if self.on_gpu:
             label_real = label_real.cuda(high_res_output.device.index)
-        loss_g_adversarial = self.adversarial_loss(d_fake_with_gradient, label_real)
+        loss_g_adversarial = self.adversarial_criterion(pred_fake_with_gradient, label_real)
         loss_g = loss_g_adversarial + loss_g_rec
 
         PSNR = self.PSNR(high_res_output, high_res_target)

@@ -143,6 +143,7 @@ if __name__ == "__main__":
                         help='Reconstruction loss function(s) and weighting, e.g. L1Loss 0.5 MSELoss 0.5')
     parser.add_argument('--per_loss', nargs='+', action='store', 
                         help='Perceptual loss function(s) and weighting, e.g. L1Loss 0.5 MSELoss 0.5')
+    parser.add_argument('--GAN_type', type=str, default='NonSaturating')    
     parser.add_argument('--fp16', action='store_true',
                         help='Mixed precision')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer to use. currently Adam or AdamP')

@@ -1,6 +1,12 @@
 third_party_repositories/
+lightning_logs/
 nbs/lightning_logs/
-experiments/
+nbs/wandb/
+nbs/older/
+nbs/checkpoints
+nbs/defocus
+nbs/fuckit.ipynb
+experiment/
 *.bak
 .gitattributes
 .last_checked

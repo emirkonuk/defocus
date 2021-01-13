@@ -16,7 +16,7 @@ class Generator(nn.Module):
 
         # Seungjun does not scale the images down to [-1,1] but rather uses [-127.5, 127.5]
         # this self.mean variable will be used for that. wonder why he calls it the "mean"?
-        self.mean = 255.0 / 2
+        self.mean = 1.0 / 2#255.0 / 2
         self.n_scales = n_scales
 
         coarsest_level = ResNet(in_channels=3,

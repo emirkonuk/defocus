@@ -19,7 +19,7 @@ Copied from DeblurGANv2 repo.
 https://github.com/VITA-Group/DeblurGANv2
 TODO: simplify the code. seriously.
 '''
-instance_norm = functools.partial(nn.InstanceNorm2d, affine=False, track_running_stats=True)
+instance_norm = functools.partial(nn.InstanceNorm2d, affine=False, track_running_stats=False)
 # Defines the PatchGAN discriminator with the specified arguments.
 # with n_layers=5 it is the full-gan
 class Discriminator(nn.Module):

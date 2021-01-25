@@ -73,7 +73,7 @@ def get_GOPRO_lists(root_folder, image_pair_list):
     return input_list, target_list
 
 # Cell
-# TODO: ugly and opaque, rewrite these
+# TODO: SLOW, ugly, opaque, rewrite these
 def tensor2im(image_tensor, imtype=np.uint8):
     image_list = []
     for image in image_tensor:

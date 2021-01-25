@@ -30,57 +30,72 @@ class Model(pl.LightningModule):
         self.D = importlib.import_module('defocus.architecture.' + D_architecture).Discriminator()
         # TODO: for consistency, there should be a self.P and all that stuff maybe?
 
-        self.content_loss = ContentLoss(name=self.hparams.model.loss.content_loss.name,
-                                        multiscale=self.hparams.model.loss.content_loss.multiscale,
-                                       )
-        self.adversarial_loss = AdversarialLoss(name=self.hparams.model.loss.adversarial_loss.name,
-                                                multiscale=self.hparams.model.loss.adversarial_loss.multiscale,
-                                               )
-        self.perceptual_loss = PerceptualLoss(name=self.hparams.model.loss.perceptual_loss.name,
-                                              layer=self.hparams.model.loss.perceptual_loss.layer,
-                                              criterion=self.hparams.model.loss.perceptual_loss.criterion,
-                                              multiscale=self.hparams.model.loss.adversarial_loss.multiscale,
-                                             )
-        self.adversarial_weight = self.hparams.model.loss.adversarial_loss.weight
-        self.content_weight = self.hparams.model.loss.content_loss.weight
-        # TODO: perceptual weight is untested
-        self.perceptual_weight = self.hparams.model.loss.perceptual_loss.weight
+#         self.content_loss = ContentLoss(name=self.hparams.model.loss.content_loss.name,
+#                                         multiscale=self.hparams.model.loss.content_loss.multiscale,
+#                                        )
+#         self.adversarial_loss = AdversarialLoss(name=self.hparams.model.loss.adversarial_loss.name,
+#                                                 multiscale=self.hparams.model.loss.adversarial_loss.multiscale,
+#                                                )
+#         self.perceptual_loss = PerceptualLoss(name=self.hparams.model.loss.perceptual_loss.name,
+#                                               layer=self.hparams.model.loss.perceptual_loss.layer,
+#                                               criterion=self.hparams.model.loss.perceptual_loss.criterion,
+#                                               multiscale=self.hparams.model.loss.adversarial_loss.multiscale,
+#                                              )
+#         self.adversarial_weight = self.hparams.model.loss.adversarial_loss.weight
+#         self.content_weight = self.hparams.model.loss.content_loss.weight
+#         # TODO: perceptual weight is untested
+#         self.perceptual_weight = self.hparams.model.loss.perceptual_loss.weight
+        self.content_loss = ContentLoss(**vars(self.hparams.model.loss.content_loss))
+        self.adversarial_loss = AdversarialLoss(**vars(self.hparams.model.loss.adversarial_loss))
+        self.perceptual_loss = PerceptualLoss(**vars(self.hparams.model.loss.perceptual_loss))
 
     def training_step(self, batch, batch_idx, optimizer_idx=None):
         input_, target = batch
         output = self.G(input_)
 
         if optimizer_idx == 0:
-            loss_d = self.adversarial_weight * self.adversarial_loss.calculate_D_loss(self.D, output, target)
+            # TODO: remove commented lines after testing
+#             loss_d = self.adversarial_weight * self.adversarial_loss.calculate_D_loss(self.D, output, target)
+            loss_d = self.adversarial_loss.calculate_D_loss(self.D, output, target)
             # lightning's logging practices are ALWAYS changing, this was for 1.0.8
             self.log('train_loss_d', loss_d)
             return loss_d
 
         elif optimizer_idx == 1:
-            loss_content = self.content_weight * self.content_loss(output, target)
-            # TODO: better one is the commented lines but for consistency,
-            # I keep using the latter code. Once I am sure, uncomment these and delete the latter
-            # loss_adv = self.adversarial_weight * self.adversarial_loss.calculate_G_loss(self.D, output, target)
-            # loss_g = loss_content + loss_adv
+            # TODO: remove commented lines after testing
+#             loss_content = self.content_weight * self.content_loss(output, target)
+            loss_content = self.content_loss(output, target)
+            loss_perceptual = self.perceptual_loss(output, target)
+            # TODO: another level of commenting, remove and remove
+#             # TODO: better one is the commented lines but for consistency,
+#             # I keep using the latter code. Once I am sure, uncomment these and delete the latter
+#             # loss_adv = self.adversarial_weight * self.adversarial_loss.calculate_G_loss(self.D, output, target)
+#             # loss_g = loss_content + loss_adv
+#             loss_adv = self.adversarial_loss.calculate_G_loss(self.D, output, target)
+#             loss_g = loss_content + self.adversarial_weight * loss_adv
             loss_adv = self.adversarial_loss.calculate_G_loss(self.D, output, target)
-            loss_g = loss_content + self.adversarial_weight * loss_adv
+            loss_g = loss_content + loss_adv + loss_perceptual
 
             # lightning's logging practices are ALWAYS changing, this was for 1.0.8
             self.log('train_loss_g', loss_g)
             self.log('train_loss_content', loss_content)
             self.log('train_loss_g_adv', loss_adv)
+            self.log('train_loss_perceptual', loss_perceptual)
             return loss_g
 
     def validation_step(self, batch, batch_idx):
+        # I had to do this. hooks didn't work.
+        # modifying on_validation_model_eval didn't work with ddp...
+        # this is as of lightning 1.0.8
+        self.train()
         assert self.G.training, "Don't use the exp-avg batch norm stats, this is a GAN, it won't work."
         input_, target = batch
-#         print(input_.shape)
         output = self.G(input_)
 
         psnr, ssim = get_metrics(input_, output, target)
         # lightning's logging best practices are ALWAYS changing, this was for 1.0.8
-        self.log('val_PSNR', torch.tensor(psnr))
-        self.log('val_SSIM', torch.tensor(ssim))
+        self.log('val_PSNR', torch.tensor(psnr).type_as(output), sync_dist=True)
+        self.log('val_SSIM', torch.tensor(ssim).type_as(output), sync_dist=True)
 
     def configure_optimizers(self):
         # and finally setup Adam
@@ -106,7 +121,6 @@ class Model(pl.LightningModule):
         input_list, target_list = get_GOPRO_lists(root_folder=self.hparams.input.datapath.root_folder,
                                                   image_pair_list=self.hparams.input.datapath.image_pair_list
                                                  )
-#         forward_process_func = get_forward_process(self.hparams.input.training_forward_process_simulator)
         train_set=BaseDataset(input_list=input_list,
                               target_list=target_list,
                               forward_process=self.hparams.input.training_forward_process_simulator,
@@ -128,7 +142,6 @@ class Model(pl.LightningModule):
         input_list, target_list = get_GOPRO_lists(root_folder=self.hparams.input.datapath.root_folder,
                                                   image_pair_list=self.hparams.input.datapath.val_image_pair_list
                                                  )
-#         forward_process_func = get_forward_process(self.hparams.input.validation_forward_process_simulator)
         val_set=BaseDataset(input_list=input_list,
                             target_list=target_list,
                             forward_process=self.hparams.input.validation_forward_process_simulator,
@@ -140,7 +153,7 @@ class Model(pl.LightningModule):
         val_loader = DataLoader(val_set,
                                 batch_size=self.hparams.training.batch_size,
                                 num_workers=self.hparams.training.num_workers,
-                                drop_last=False,
+                                drop_last=True,
                                 shuffle=False,
                                )
         return val_loader
@@ -158,11 +171,13 @@ class Model(pl.LightningModule):
 #         elif optimizer_idx == 1:
 #             loss.backward()
 
-    def on_validation_model_eval(self):
-        # I don't like this way of doing things, feels non-lightning
-        # I made a comment here:
-        # https://github.com/PyTorchLightning/pytorch-lightning/issues/2551#issuecomment-742601083
-        self.train()
+# this also doesn't work as of lightning 1.0.8
+#     def on_validation_model_eval(self):
+#         # I don't like this way of doing things, feels non-lightning
+#         # I made a comment here:
+#         # https://github.com/PyTorchLightning/pytorch-lightning/issues/2551#issuecomment-742601083
+#         self.train()
+
 
     def on_test_model_eval(self):
         # same thing as on_validation_model_eval

@@ -7,7 +7,7 @@ import os
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 from defocus.model import Model
 from defocus.utilities import Bunch
@@ -20,23 +20,32 @@ parser.add_argument('--dryrun', default=None, action='store_true', help='do not 
 def main(args):
     if args.training.seed:       
         pl.seed_everything(args.training.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
 
         
-    wandb_logger = WandbLogger(name='dump_defocus_multiscale',
-                            project='defocus',
-                            log_model=False,
-                            save_dir='lightning_logs')
+    wandb_logger = WandbLogger(name='dump_defocus_multi_gpu_fp32_no_track_bs16',
+                               project='defocus',
+                               log_model=False,
+                               save_dir='../all_logs/defocus')
 
-    callbacks = [LearningRateMonitor(logging_interval='step')]
+    callbacks = [LearningRateMonitor(logging_interval='step'),
+                 ModelCheckpoint(dirpath='../all_models/defocus',
+                                 monitor='val_PSNR',
+                                 save_top_k=5,
+                                 save_last=True,
+                                 mode='max',
+                                )
+                ]
     if hasattr(Callbacks, args.model.callbacks):
         callbacks += [getattr(Callbacks, args.model.callbacks)()]
-    trainer = pl.Trainer(gpus=[0],
+    trainer = pl.Trainer(gpus=args.training.gpus,
+                        accelerator='ddp',
                         callbacks=callbacks,
                         logger=wandb_logger,
                         log_every_n_steps=1,
                         max_epochs=args.training.max_epochs,
+                        precision=args.training.precision,
     #                      limit_train_batches=10,
     #                      limit_val_batches=10,
                         )

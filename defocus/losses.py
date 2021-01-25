@@ -25,11 +25,13 @@ class ContentLoss(nn.Module):
     >> content_loss_instance(input, target)
     i.e. normal forward call with a pytorch module
     """
-    def __init__(self, name, multiscale=None): # TODO: need a better name than multiscale, this tells nothing to the reader?!
+    def __init__(self, name, weight=1.0, multiscale=None): # TODO: need a better name than multiscale, this tells nothing to the reader?!
         super(ContentLoss, self).__init__()
         self.multiscale = multiscale
+        self.weight = weight
+
         if not hasattr(nn, name):
-            assert False, "nope"
+            assert False, "nope, you asked for {} but nn don't have one".format(name)
             fancy_content_loss_functions = {'Nope': None}
         else:
             self.criterion_func = getattr(nn, name)()
@@ -37,12 +39,11 @@ class ContentLoss(nn.Module):
     def forward(self, fake, real):
         if self.multiscale is None:
             content_loss = self.criterion_func(fake, real)
-            return content_loss
         else:
             content_loss = 0
             for scale in self.multiscale:
                 content_loss += self.criterion_func(fake[scale], real[scale])
-            return content_loss
+        return content_loss * self.weight
 
 
 class PerceptualLoss(nn.Module):
@@ -54,27 +55,24 @@ class PerceptualLoss(nn.Module):
     >> perceptual_loss_instance(input, target)
     i.e. normal forward call with a pytorch module
     """
-    def __init__(self, name, layer, criterion='L1Loss', multiscale=None, requires_grad=False):
+    def __init__(self, name, weight=1.0, layer=14, criterion='L1Loss', multiscale=None, requires_grad=False):
         super(PerceptualLoss, self).__init__()
         self.multiscale = multiscale
-        # if yaml says None, it is None
-        if criterion is None:
-            self.criterion_func = None
-        # otherwise, do the thing
-        else:
+        self.weight = weight
+
+        if hasattr(torchvision.models, name):
             self.criterion_func = getattr(nn, criterion)()
-            # original paper picks the relu2_2 from vgg16, i.e. 8th layer
-            # deblurgan picks conv3_3 from vgg19, i.e. 14th layer
-            # lpips is up to relu5_3 from vgg16 , i.e. everything
             module = getattr(torchvision.models, name)
             pretrained = module(pretrained=True).features
-
             # TODO: check what lightning does for this. does it assign it to the correct cuda etc.?
             # if not I may have to create the network separately in the LightningModule __init__()
             self.network = nn.Sequential()
             # it is layer+1 because we add including the "layer" in the yaml
             for i in range(layer+1):
                 self.network.add_module(str(pretrained[i]), pretrained[i])
+        # if .yaml says None, it is None
+        elif name is None:
+            self.criterion_func = None
 
     def forward(self, fake, real):
         # TODO: deblurgan does some weird stuff here, check it:
@@ -94,7 +92,7 @@ class PerceptualLoss(nn.Module):
         real_features = self.network(real).detach()
         fake_features = self.network(fake)
         content_loss = self.criterion_func(fake_features, real_features)
-        return content_loss
+        return content_loss * self.weight
 
 
 class AdversarialLoss():
@@ -108,31 +106,32 @@ class AdversarialLoss():
     scale given in the multiscale arg
 
     """
-    def __init__(self, name, multiscale=None):
+    def __init__(self, name, weight=1.0, multiscale=None):
         self.multiscale = multiscale
         #https://docs.python.org/3/faq/programming.html#how-do-i-use-strings-to-call-functions-methods
         adversarial_modes = {'WGAN_with_GP': WGAN_with_GP,
                              'RaLSGAN' : RaLSGAN,
                             }
         self.adversarial = adversarial_modes[name]()
+        self.weight = weight
 
     def calculate_D_loss(self, D, fake, real):
         if self.multiscale is None:
-            return self.adversarial.calculate_D_loss(D, fake, real)
+            D_loss = self.adversarial.calculate_D_loss(D, fake, real)
         else:
             D_loss = 0
             for scale in self.multiscale:
                 D_loss += self.adversarial.calculate_D_loss(D, fake[scale], real[scale])
-            return D_loss
+        return D_loss * self.weight
 
     def calculate_G_loss(self, D, fake, real):
         if self.multiscale is None:
-            return self.adversarial.calculate_G_loss(D, fake, real)
+            G_loss = self.adversarial.calculate_G_loss(D, fake, real)
         else:
             G_loss = 0
             for scale in self.multiscale:
                 G_loss += self.adversarial.calculate_G_loss(D, fake[scale], real[scale])
-            return G_loss
+        return G_loss * self.weight
 
 
 class WGAN_with_GP(nn.Module):
@@ -153,10 +152,6 @@ class WGAN_with_GP(nn.Module):
         self.LAMBDA = 10
 
     def calculate_G_loss(self, D, fake, real):
-        # TODO: check:
-        # what is this explicitly calling the forward thing?
-        # this is not good practice, why did I do this?
-#         pred_fake = D.forward(fake)
         pred_fake = D(fake)
         return -pred_fake.mean()
 
@@ -173,7 +168,7 @@ class WGAN_with_GP(nn.Module):
         return D_loss + gradient_penalty
 
     def calc_gradient_penalty(self, D, fake, real):
-        # careful here with all the cuda devices! note that lightning don't
+        # careful here with all the cuda devices! note that lightning doesn't
         # like explicit device assignments
         alpha = torch.rand(1, 1)
         alpha = alpha.expand(real.size())

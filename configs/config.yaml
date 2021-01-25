@@ -1,9 +1,9 @@
 training:
-  seed: 42 # leave empty 
-  batch_size: 8
-  num_gpu: 2
+  seed: 42 # leave empty for random seeds
+  batch_size: 16
+  gpus: [0,1]
   num_workers: 8
-  fp16: true
+  precision: 32
   max_epochs: &MAX_EPOCHS 250
   metric:
     - SSIM
@@ -19,10 +19,11 @@ input:
   size: &SIZE 256
   # how many downsampled image pyramid scales are used
   # IMPORTANT: this must match what the architecture expects as input
-  # it is here mostly for 
   pyramid_levels: 1 
   # IMPORTANT: if you provide a simulator, your input_file_list will be overridden by the target_file_list
-  training_forward_process_simulator: &FORWARD_PROCESS # remove type etc. if your dataset has an actual/real distortion 
+  training_forward_process_simulator: &FORWARD_PROCESS 
+    # if your dataset has an actual/real distorted images comment out the following lines 
+    # this is the name of your forward_process_func
     type: hanser_defocus 
     # put the kwargs of your forward_process_func here
     scale: 1.0
@@ -88,31 +89,33 @@ input:
     type: OneOf # can't have additional targets
     p: 0.5
     transforms: &CORRUPT
-#     - type: Cutout # this is not classification what are we teaching here, how to deal with black boxes?
-#       num_holes: 3
-#       max_h_size: 25
-#       max_w_size: 25
-#     - type: JpegCompression # I am VERY suspicios about this corruption. shouldn't be used
-#       quality_lower: 70
-#       quality_upper: 90
-#     - type: MotionBlur
-#     - type: MedianBlur
+    - type: Cutout # this is not classification what are we teaching here, how to deal with black boxes?
+      num_holes: 3
+      max_h_size: 25
+      max_w_size: 25
+    - type: JpegCompression # I am VERY suspicios about this corruption. shouldn't be used
+      quality_lower: 70
+      quality_upper: 90
+    - type: MotionBlur
+    - type: MedianBlur
     - type: RandomGamma
     - type: RGBShift
     - type: HueSaturationValue
-#     - type: IAASharpen   # I am VERY suspicios about this corruption. shouldn't be used
+    - type: IAASharpen   # I am VERY suspicios about this corruption. shouldn't be used
   validation_corruptions: *TRAINING_CORRUPTIONS
 
 
 model:
   callbacks: DeblurGANv2Callbacks
   generator:
-    architecture: &ARCHITECTURE DeblurGANv2 # MSResNet #
+    architecture: &ARCHITECTURE DeblurGANv2 # MSResNet
     optimizer: &OPTIMIZER
+      # TODO: be consistent, either use 'name' or 'type'
       name: Adam
       lr: 1e-4
     scheduler: &SCHEDULER
-      name: LinearDecay # DeblurGANv2 scheduler is LinearDecay
+      # TODO: be consistent, either use 'name' or 'type'
+      name: LinearDecay # TODO: use an established scheduler, not this LinearDecay from DeblurGAN
       num_epochs: *MAX_EPOCHS
       start_epoch: 50
       min_lr: 0.0000001
@@ -123,27 +126,30 @@ model:
     differentiable_augmentations: #TODO, kornia or other differentiable augs here
   loss:
     adversarial_loss: 
-        name: RaLSGAN
-        weight: 0.001
-        # if using a multiscale architecture, provide a list for which image scales
-        # the loss is applied (0 is the smallest resolution)
-        multiscale: #[2]
+      # TODO: be consistent, either use 'name' or 'type'
+      name: RaLSGAN
+      weight: 0.001
+      # if using a multiscale architecture, provide a list for which image scales
+      # the loss is applied to (0 is the smallest resolution)
+      multiscale: #[2]
     content_loss:
-        name: L1Loss
-        weight: 1.0
-        # if using a multiscale architecture, provide a list for which image scales
-        # the loss is applied (0 is the smallest resolution)
-        multiscale: #[0,1,2]
-    perceptual_loss: 
+      name: L1Loss
+      weight: 1.0
+      # if using a multiscale architecture, provide a list for which image scales
+      # the loss is applied to (0 is the smallest resolution)
+      multiscale: #[0,1,2]      
     # original paper picks the relu2_2 from vgg16, i.e. 8th layer
     # deblurgan picks conv3_3 from vgg19, i.e. 14th layer
     # lpips is up to relu5_3 from vgg16 , i.e. everything
-        name: #vgg19
-        layer: #14
-        criterion: #L1Loss
-        weight: #1.0
-        # if using a multiscale architecture, provide a list for which image scales
-        # the loss is applied (0 is the smallest resolution)
-        multiscale: #[2]
-    stop_loss:
-    flood_loss: 0
+    perceptual_loss: 
+      # if you are picking a vanilla network, it needs to be in torchvision.models and also provide layer and criterion
+      # if you are choosing lpips, provide the kwargs, e.g.: name: lpips and net: vgg
+      name: vgg19
+      weight: 0.05
+      layer: 14
+      criterion: L1Loss
+      # if using a multiscale architecture, provide a list for which image scales
+      # the loss is applied to (0 is the smallest resolution)
+      multiscale: #[2]
+    stop_loss: # TODO: unused
+    flood_loss: 0 # TODO: unused(?), check

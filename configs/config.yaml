@@ -1,9 +1,9 @@
 training:
-  seed: 42 # leave empty for random seeds
-  batch_size: 16
-  gpus: [0,1]
+  seed: #42 # leave empty for random seeds
+  batch_size: 32
+  gpus: [0]
   num_workers: 8
-  precision: 32
+  precision: 16
   max_epochs: &MAX_EPOCHS 250
   metric:
     - SSIM
@@ -70,14 +70,6 @@ input:
     additional_targets: true
     p: 1.0
     transforms:
-      - type: OneOf
-        p: 1.0
-        transforms:
-        - type: HorizontalFlip
-        - type: ShiftScaleRotate
-        - type: Transpose
-        - type: OpticalDistortion
-        - type: ElasticTransform
       - type: CenterCrop
         height: *SIZE
         width: *SIZE
@@ -102,7 +94,7 @@ input:
     - type: RGBShift
     - type: HueSaturationValue
     - type: IAASharpen   # I am VERY suspicios about this corruption. shouldn't be used
-  validation_corruptions: *TRAINING_CORRUPTIONS
+  validation_corruptions: #*TRAINING_CORRUPTIONS
 
 
 model:

@@ -18,13 +18,12 @@ parser.add_argument('--config_path', type=str, default='configs/config.yaml', he
 parser.add_argument('--dryrun', default=None, action='store_true', help='do not upload to wandb')
 
 def main(args):
-    if args.training.seed:       
-        pl.seed_everything(args.training.seed)
+    pl.seed_everything(args.training.seed)
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.benchmark = False
 
         
-    wandb_logger = WandbLogger(name='dump_defocus_multi_gpu_fp32_no_track_bs16',
+    wandb_logger = WandbLogger(name='single_gpu_fp16_bs32',
                                project='defocus',
                                log_model=False,
                                save_dir='../all_logs/defocus')

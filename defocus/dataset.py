@@ -169,6 +169,8 @@ class get_transformation(object):
         augmentation = copy.deepcopy(_augmentation)
         # I wanted to use recursion since forever
         # I am sorry and  I won't do it again
+        if augmentation is None:
+            return None
         if not hasattr(augmentation, 'transforms'):
             return getattr(albu, vars(augmentation).pop('type'))(**vars(augmentation))
         else:
@@ -185,8 +187,10 @@ class get_transformation(object):
         if hasattr(self.aug_func, 'additional_targets'):
             returned_tuple = self.aug_func(image=input_, target=target)
             return returned_tuple['image'], returned_tuple['target']
-        else:
+        elif self.aug_func is not None:
             return self.aug_func(image=input_)['image']
+        else:
+            return input_
 
 class get_pyramid_generator(object):
     def __init__(self, pyramid_levels):

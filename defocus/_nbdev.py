@@ -3,6 +3,7 @@
 __all__ = ["index", "modules", "custom_doc_links", "git_url"]
 
 index = {"Bunch": "01_utilities.ipynb",
+         "wrap_namespace": "01_utilities.ipynb",
          "sanity_check": "01_utilities.ipynb",
          "get_GOPRO_lists": "01_utilities.ipynb",
          "tensor2im": "01_utilities.ipynb",

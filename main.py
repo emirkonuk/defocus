@@ -10,7 +10,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 from defocus.model import Model
-from defocus.utilities import Bunch
+from defocus.utilities import wrap_namespace
 import defocus.callbacks as Callbacks
 
 parser = argparse.ArgumentParser(description='It is time for more... experiments.')
@@ -22,14 +22,14 @@ def main(args):
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.benchmark = False
 
-        
-    wandb_logger = WandbLogger(name='single_gpu_fp16_bs32',
+    name = f"single_gpu_fp{args.training.precision}_bs{args.training.batch_size}_repeat2"    
+    wandb_logger = WandbLogger(name=name,
                                project='defocus',
                                log_model=False,
-                               save_dir='../all_logs/defocus')
+                               save_dir='../all_logs/defocus/')
 
     callbacks = [LearningRateMonitor(logging_interval='step'),
-                 ModelCheckpoint(dirpath='../all_models/defocus',
+                 ModelCheckpoint(dirpath='../all_models/defocus/' + name,
                                  monitor='val_PSNR',
                                  save_top_k=5,
                                  save_last=True,
@@ -39,7 +39,7 @@ def main(args):
     if hasattr(Callbacks, args.model.callbacks):
         callbacks += [getattr(Callbacks, args.model.callbacks)()]
     trainer = pl.Trainer(gpus=args.training.gpus,
-                        accelerator='ddp',
+#                         accelerator='ddp',
                         callbacks=callbacks,
                         logger=wandb_logger,
                         log_every_n_steps=1,
@@ -57,11 +57,7 @@ if __name__ == "__main__":
         os.environ["WANDB_MODE"] = "dryrun"  
     with open(args.config_path, 'r') as f:
         config = yaml.safe_load(f)
-        # Bunch is for **recursively** creating a Namespace from dict object
-        bunch = Bunch(config)
-        # but lightning must have a Namespace object, so convert to Namespace back again
-        args = argparse.Namespace(**vars(bunch))
-    args = argparse.Namespace(**vars(bunch))
+        args = wrap_namespace(config)
     main(args)
 
     
